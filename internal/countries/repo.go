@@ -3,13 +3,17 @@ package countries
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
+
+	"github.com/zjoart/countryxchange/pkg/logger"
 )
 
 var ErrNotFound = errors.New("not found")
 
 // EnsureTables creates countries and metadata tables when needed
 func EnsureTables(db *sql.DB) error {
+	logger.Info("repo: EnsureTables start")
 	// countries table
 	createCountries := `
     CREATE TABLE IF NOT EXISTS countries (
@@ -27,6 +31,7 @@ func EnsureTables(db *sql.DB) error {
     );`
 
 	if _, err := db.Exec(createCountries); err != nil {
+		logger.Error("repo: create countries table failed", logger.WithError(err))
 		return err
 	}
 
@@ -39,9 +44,11 @@ func EnsureTables(db *sql.DB) error {
     );`
 
 	if _, err := db.Exec(createMeta); err != nil {
+		logger.Error("repo: create metadata table failed", logger.WithError(err))
 		return err
 	}
 
+	logger.Info("repo: EnsureTables complete")
 	return nil
 }
 
@@ -95,35 +102,46 @@ func UpsertCountry(tx *sql.Tx, c *Country) error {
 		c.LastRefreshedAt,
 	)
 
+	if err != nil {
+		logger.Error("repo: UpsertCountry failed", logger.Fields{"country": c.Name}, logger.WithError(err))
+	}
 	return err
 }
 
 // GetAll returns countries matching optional filters and sorting
 func GetAll(db *sql.DB, region, currency, sort string) ([]Country, error) {
 	base := `SELECT id, name, capital, region, population, currency_code, exchange_rate, estimated_gdp, flag_url, last_refreshed_at FROM countries`
-	var filters []interface{}
-	where := ""
+
+	// Build WHERE conditions in a slice so multiple filters combine cleanly
+	var conds []string
+	var args []interface{}
 	if region != "" {
-		where += " WHERE region = ?"
-		filters = append(filters, region)
+		// case-insensitive match
+		conds = append(conds, "LOWER(region) = LOWER(?)")
+		args = append(args, region)
 	}
 	if currency != "" {
-		if where == "" {
-			where += " WHERE currency_code = ?"
-		} else {
-			where += " AND currency_code = ?"
-		}
-		filters = append(filters, currency)
+		conds = append(conds, "LOWER(currency_code) = LOWER(?)")
+		args = append(args, currency)
 	}
 
 	order := ""
 	if sort == "gdp_desc" {
 		order = " ORDER BY estimated_gdp DESC"
+	} else if sort == "gdp_asc" {
+		order = " ORDER BY estimated_gdp ASC"
+	}
+
+	where := ""
+	if len(conds) > 0 {
+		where = " WHERE " + strings.Join(conds, " AND ")
 	}
 
 	q := base + where + order
-	rows, err := db.Query(q, filters...)
+	logger.Debug("repo: GetAll final query", logger.Fields{"query": q, "args": args})
+	rows, err := db.Query(q, args...)
 	if err != nil {
+		logger.Error("repo: GetAll query failed", logger.WithError(err))
 		return nil, err
 	}
 	defer rows.Close()
@@ -162,6 +180,7 @@ func GetAll(db *sql.DB, region, currency, sort string) ([]Country, error) {
 		out = append(out, c)
 	}
 
+	logger.Info("repo: GetAll complete", logger.Fields{"count": len(out)})
 	return out, nil
 }
 
@@ -177,8 +196,10 @@ func GetByName(db *sql.DB, name string) (*Country, error) {
 
 	if err := row.Scan(&c.ID, &c.Name, &capital, &region, &c.Population, &currency, &exchange, &est, &flag, &last); err != nil {
 		if err == sql.ErrNoRows {
+			logger.Debug("repo: GetByName not found", logger.Fields{"name": name})
 			return nil, ErrNotFound
 		}
+		logger.Error("repo: GetByName failed", logger.Fields{"name": name}, logger.WithError(err))
 		return nil, err
 	}
 	if capital.Valid {
@@ -203,6 +224,7 @@ func GetByName(db *sql.DB, name string) (*Country, error) {
 		c.LastRefreshedAt = &last.Time
 	}
 
+	logger.Info("repo: GetByName success", logger.Fields{"name": c.Name, "id": c.ID})
 	return &c, nil
 }
 
@@ -211,12 +233,15 @@ func DeleteByName(db *sql.DB, name string) (bool, error) {
 	q := `DELETE FROM countries WHERE LOWER(name) = LOWER(?)`
 	res, err := db.Exec(q, name)
 	if err != nil {
+		logger.Error("repo: DeleteByName failed", logger.Fields{"name": name}, logger.WithError(err))
 		return false, err
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
+		logger.Error("repo: DeleteByName RowsAffected failed", logger.Fields{"name": name}, logger.WithError(err))
 		return false, err
 	}
+	logger.Info("repo: DeleteByName result", logger.Fields{"name": name, "deleted": n > 0})
 	return n > 0, nil
 }
 
@@ -225,8 +250,10 @@ func TotalCount(db *sql.DB) (int64, error) {
 	q := `SELECT COUNT(*) FROM countries`
 	var n int64
 	if err := db.QueryRow(q).Scan(&n); err != nil {
+		logger.Error("repo: TotalCount failed", logger.WithError(err))
 		return 0, err
 	}
+	logger.Info("repo: TotalCount", logger.Fields{"count": n})
 	return n, nil
 }
 
@@ -234,6 +261,11 @@ func TotalCount(db *sql.DB) (int64, error) {
 func SaveLastRefreshed(tx *sql.Tx, t time.Time) error {
 	q := `INSERT INTO metadata (meta_key, meta_value, updated_at) VALUES ('last_refreshed_at', ?, ?) ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value), updated_at = VALUES(updated_at)`
 	_, err := tx.Exec(q, t.UTC().Format(time.RFC3339), t)
+	if err != nil {
+		logger.Error("repo: SaveLastRefreshed failed", logger.WithError(err))
+	} else {
+		logger.Info("repo: SaveLastRefreshed", logger.Fields{"t": t.UTC().Format(time.RFC3339)})
+	}
 	return err
 }
 
@@ -245,6 +277,7 @@ func GetLastRefreshed(db *sql.DB) (*time.Time, error) {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
+		logger.Error("repo: GetLastRefreshed failed", logger.WithError(err))
 		return nil, err
 	}
 	if !v.Valid || v.String == "" {
@@ -253,7 +286,9 @@ func GetLastRefreshed(db *sql.DB) (*time.Time, error) {
 	t, err := time.Parse(time.RFC3339, v.String)
 	if err != nil {
 		// fallback to null
+		logger.Warn("repo: GetLastRefreshed parse failed", logger.WithError(err))
 		return nil, nil
 	}
+	logger.Info("repo: GetLastRefreshed", logger.Fields{"t": t.UTC().Format(time.RFC3339)})
 	return &t, nil
 }

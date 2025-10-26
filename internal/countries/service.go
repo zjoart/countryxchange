@@ -8,6 +8,8 @@ import (
 	"math/rand"
 	"net/http"
 	"time"
+
+	"github.com/zjoart/countryxchange/pkg/logger"
 )
 
 const (
@@ -43,26 +45,32 @@ type ExternalError struct {
 	API string
 }
 
-func (e ExternalError) Error() string { return fmt.Sprintf("external API %s failed", e.API) }
+func (e ExternalError) Error() string {
+	return fmt.Sprintf("Could not fetch data from %s", e.API)
+}
 
 // Refresh fetches external data and updates DB in a transaction.
 // If external fetch fails, no DB changes are made.
 func Refresh(ctx context.Context, db *sql.DB) (*RefreshResult, error) {
+	logger.Info("service: Refresh started")
 	client := &http.Client{Timeout: 20 * time.Second}
 
 	// fetch countries
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, countriesURL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
+		logger.Warn("service: failed fetching countries", logger.WithError(err))
 		return nil, ExternalError{API: "restcountries"}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		logger.Warn("service: restcountries returned non-200", logger.Fields{"status": resp.StatusCode})
 		return nil, ExternalError{API: "restcountries"}
 	}
 
 	var rc []restCountry
 	if err := json.NewDecoder(resp.Body).Decode(&rc); err != nil {
+		logger.Warn("service: failed decoding restcountries response", logger.WithError(err))
 		return nil, ExternalError{API: "restcountries"}
 	}
 
@@ -70,25 +78,30 @@ func Refresh(ctx context.Context, db *sql.DB) (*RefreshResult, error) {
 	req2, _ := http.NewRequestWithContext(ctx, http.MethodGet, ratesURL, nil)
 	resp2, err := client.Do(req2)
 	if err != nil {
+		logger.Warn("service: failed fetching exchange rates", logger.WithError(err))
 		return nil, ExternalError{API: "exchangerates"}
 	}
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusOK {
+		logger.Warn("service: exchangerates returned non-200", logger.Fields{"status": resp2.StatusCode})
 		return nil, ExternalError{API: "exchangerates"}
 	}
 
 	var rr ratesResp
 	if err := json.NewDecoder(resp2.Body).Decode(&rr); err != nil {
+		logger.Warn("service: failed decoding exchangerates response", logger.WithError(err))
 		return nil, ExternalError{API: "exchangerates"}
 	}
 
 	// prepare DB
 	if err := EnsureTables(db); err != nil {
+		logger.Error("service: EnsureTables failed", logger.WithError(err))
 		return nil, err
 	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
+		logger.Error("service: begin tx failed", logger.WithError(err))
 		return nil, err
 	}
 
@@ -99,6 +112,12 @@ func Refresh(ctx context.Context, db *sql.DB) (*RefreshResult, error) {
 
 	processed := 0
 	for _, rcountry := range rc {
+		// prepare Country struct for validation
+		if rcountry.Name == "" {
+			logger.Warn("service: country name missing from external API")
+			continue
+		}
+
 		var currencyCode *string
 		var exchangeRate *float64
 		var estimatedGDP *float64
@@ -143,7 +162,17 @@ func Refresh(ctx context.Context, db *sql.DB) (*RefreshResult, error) {
 		c.ExchangeRate = exchangeRate
 		c.EstimatedGDP = estimatedGDP
 
+		// validate before upserting
+		if err := c.Validate(); err != nil {
+			logger.Warn("service: country validation failed", logger.Fields{
+				"country": c.Name,
+				"errors":  err.(*ValidationError).Errors,
+			})
+			continue
+		}
+
 		if err := UpsertCountry(tx, c); err != nil {
+			logger.Error("service: UpsertCountry failed", logger.WithError(err))
 			tx.Rollback()
 			return nil, err
 		}
@@ -152,19 +181,26 @@ func Refresh(ctx context.Context, db *sql.DB) (*RefreshResult, error) {
 
 	// save last refreshed
 	if err := SaveLastRefreshed(tx, now); err != nil {
+		logger.Error("service: SaveLastRefreshed failed", logger.WithError(err))
 		tx.Rollback()
 		return nil, err
 	}
 
 	if err := tx.Commit(); err != nil {
+		logger.Error("service: tx commit failed", logger.WithError(err))
 		tx.Rollback()
 		return nil, err
 	}
 
 	// generate summary image (best-effort)
 	go func() {
-		_ = GenerateSummaryImage(db, "cache/summary.png")
+		if err := GenerateSummaryImage(db, "cache/summary.png"); err != nil {
+			logger.Warn("service: GenerateSummaryImage failed", logger.WithError(err))
+		} else {
+			logger.Info("service: GenerateSummaryImage completed")
+		}
 	}()
 
+	logger.Info("service: Refresh completed", logger.Fields{"total_processed": processed})
 	return &RefreshResult{Total: processed, LastRefreshed: now}, nil
 }

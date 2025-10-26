@@ -19,19 +19,13 @@ All responses are JSON unless noted (image endpoint).
 
 ## Config / .env
 
-The project uses environment variables. Create a `.env` at project root with at least:
+The project uses environment variables. Copy the `.env.example` file to `.env` at the project root and update the values as needed:
 
+```bash
+cp .env.example .env
 ```
-PORT=8080
-APP_ENV=development
-DB_USER=root
-DB_PASS=secret
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_NAME=countryxchange
-API_BASE=localhost:8080
-SWAGGER_SCHEMES=http
-```
+
+Then edit the `.env` file with your configuration values.
 
 ## Database
 
@@ -56,20 +50,32 @@ If either external API fails the refresh will abort and return 503 — no DB cha
 
 ## Run locally
 
-Make sure `go` is installed and `go` modules can download dependencies.
+Make sure `go` is installed and `go` modules can download dependencies. This project includes a `Makefile` with convenient targets. From the project root you can use:
 
 ```bash
-# from project root
-go mod tidy
-go build ./cmd/app
-./app
+# tidy modules (same as 'go mod tidy')
+make tidy
+
+# run the application (same as 'go run ./cmd/app')
+make run
+
+# show available make targets
+make help
 ```
 
-Alternatively use `go run`:
+If you prefer the raw go commands, the equivalent are:
 
 ```bash
+go mod tidy
 go run ./cmd/app
 ```
+
+### Database Setup
+
+The service will automatically create the required database tables (`countries` and `metadata`) when you call `POST /countries/refresh` for the first time. The tables are created using `CREATE TABLE IF NOT EXISTS` statements. Just ensure that:
+
+1. The MySQL database specified in your `.env` (`DB_NAME`) exists
+2. The configured database user has sufficient privileges to create tables
 
 ## Notes & next steps
 

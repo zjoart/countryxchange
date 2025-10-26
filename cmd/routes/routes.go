@@ -54,7 +54,9 @@ func SetUpRoutes(db *sql.DB, cfg *config.Config) http.Handler {
 		docs.SwaggerInfo.Schemes = cfg.Swagger.Schemes
 	}
 
-	if cfg.AppEnv != "production" {
+	isProduction := cfg.AppEnv == "production"
+
+	if !isProduction {
 		// Serve Swagger UI only in non-production environments
 		router.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)
 
@@ -72,7 +74,7 @@ func SetUpRoutes(db *sql.DB, cfg *config.Config) http.Handler {
 
 	// Register country feature routes
 	// keep feature based routing in internal/countries
-	countries.RegisterRoutes(router, db)
+	countries.RegisterRoutes(router, db, isProduction)
 
 	return router
 }

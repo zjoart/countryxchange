@@ -2,7 +2,18 @@
 
 Country Currency & Exchange API
 
-This service fetches country data from the REST Countries API, fetches exchange rates, computes an estimated GDP and caches the data in a MySQL database. It exposes REST endpoints to refresh the cache and query country data.
+The service fetches country data from the REST Countries API, fetches exchange rates, computes an estimated GDP and caches the data in a MySQL database. It exposes REST endpoints to refresh the cache and query country data.
+
+## Live API
+The API is deployed and available at:
+```
+https://exciting-gratitude-production.up.railway.app
+```
+
+View the complete API documentation at:
+```
+https://exciting-gratitude-production.up.railway.app/swagger/index.html
+```
 
 ## Quick overview
 
@@ -50,6 +61,8 @@ If either external API fails the refresh will abort and return 503 — no DB cha
 
 ## Run locally
 
+You can run the service locally for development. The production version is deployed at `https://exciting-gratitude-production.up.railway.app`.
+
 Make sure `go` is installed and `go` modules can download dependencies. This project includes a `Makefile` with convenient targets. From the project root you can use:
 
 ```bash
@@ -76,6 +89,26 @@ The service will automatically create the required database tables (`countries` 
 
 1. The MySQL database specified in your `.env` (`DB_NAME`) exists
 2. The configured database user has sufficient privileges to create tables
+
+## API Documentation
+
+The API is documented using Swagger/OpenAPI. You can access the interactive API documentation when the service is running:
+
+```bash
+# Access Swagger UI locally
+http://localhost:8080/swagger/index.html
+
+# Access deployed Swagger UI
+https://exciting-gratitude-production.up.railway.app/swagger/index.html
+```
+
+The Swagger UI provides:
+- Interactive API documentation
+- Request/response schemas
+- Example values
+- Try-it-out functionality to test endpoints directly
+- Detailed error responses
+- Query parameter documentation
 
 ## Notes & next steps
 

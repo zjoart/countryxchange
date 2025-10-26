@@ -11,6 +11,27 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
+// DropTables drops the countries and metadata tables
+func DropTables(db *sql.DB) error {
+	logger.Info("repo: DropTables start")
+
+	// Drop tables in reverse order of dependencies
+	dropMetadata := `DROP TABLE IF EXISTS metadata;`
+	if _, err := db.Exec(dropMetadata); err != nil {
+		logger.Error("repo: drop metadata table failed", logger.WithError(err))
+		return err
+	}
+
+	dropCountries := `DROP TABLE IF EXISTS countries;`
+	if _, err := db.Exec(dropCountries); err != nil {
+		logger.Error("repo: drop countries table failed", logger.WithError(err))
+		return err
+	}
+
+	logger.Info("repo: DropTables complete")
+	return nil
+}
+
 // EnsureTables creates countries and metadata tables when needed
 func EnsureTables(db *sql.DB) error {
 	logger.Info("repo: EnsureTables start")

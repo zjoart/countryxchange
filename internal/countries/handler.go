@@ -28,7 +28,7 @@ func writeError(w http.ResponseWriter, status int, msg string, details interface
 }
 
 // RegisterRoutes mounts country endpoints onto router
-func RegisterRoutes(r *mux.Router, db *sql.DB) {
+func RegisterRoutes(r *mux.Router, db *sql.DB, isProduction bool) {
 	r.HandleFunc("/countries/refresh", func(w http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
 
@@ -163,4 +163,20 @@ func RegisterRoutes(r *mux.Router, db *sql.DB) {
 		logger.Info("handler: status response", logger.Fields{"total_countries": total, "last_refreshed_at": lastStr})
 		writeJSON(w, http.StatusOK, map[string]interface{}{"total_countries": total, "last_refreshed_at": lastStr})
 	}).Methods("GET")
+
+	if !isProduction {
+		// Drop tables endpoint - BE CAREFUL WITH THIS IN PRODUCTION!
+		r.HandleFunc("/drop-tables", func(w http.ResponseWriter, req *http.Request) {
+			logger.Warn("handler: dropping all tables", logger.Fields{"remote_addr": req.RemoteAddr})
+
+			if err := DropTables(db); err != nil {
+				logger.Error("handler: drop tables failed", logger.WithError(err))
+				writeError(w, http.StatusInternalServerError, "Failed to drop tables", nil)
+				return
+			}
+
+			logger.Info("handler: tables dropped successfully")
+			writeJSON(w, http.StatusOK, map[string]string{"message": "Tables dropped successfully"})
+		}).Methods("POST")
+	}
 }

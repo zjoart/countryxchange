@@ -5,6 +5,8 @@ import (
 
 	"github.com/zjoart/countryxchange/internal/config"
 
+	"github.com/zjoart/countryxchange/internal/countries"
+
 	"net/http"
 
 	"github.com/zjoart/countryxchange/internal/middleware"
@@ -67,6 +69,10 @@ func SetUpRoutes(db *sql.DB, cfg *config.Config) http.Handler {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Service is up and running"))
 	}).Methods("GET")
+
+	// Register country feature routes
+	// keep feature based routing in internal/countries
+	countries.RegisterRoutes(router, db)
 
 	return router
 }
